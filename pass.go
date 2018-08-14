@@ -13,6 +13,10 @@ import (
 	"path/filepath"
 )
 
+// New will create a new Apple pass given the directory of companion files, the
+// password needed to open the certificate, and the certificate. You should read
+// the returned reader into a file, this file is your Apple pass and can be opened
+// from iOS and macOS devices.
 func New(passDir, password string, cert io.Reader) (io.Reader, error) {
 	// Create a temporary directory that we will use as a scratch pad for our
 	// openssl commands.
