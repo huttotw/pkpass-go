@@ -2,7 +2,6 @@ package pkpass_test
 
 import (
 	"io"
-	"io/ioutil"
 	"os"
 	"testing"
 
@@ -10,18 +9,13 @@ import (
 )
 
 func TestNew(t *testing.T) {
-	files, err := ioutil.ReadDir("Coupon.pass")
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	cert, err := os.Open("Certificates.p12")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cert.Close()
 
-	r, err := pkpass.New(files, cert, "")
+	r, err := pkpass.New("Coupon.pass", "", cert)
 	if err != nil {
 		t.Fatal(err)
 	}

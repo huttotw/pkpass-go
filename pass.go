@@ -10,42 +10,39 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"path/filepath"
 )
 
-type archive struct {
-	content []byte
-	name    string
-}
-
-func New(files []os.FileInfo, cert io.Reader, password string) (io.Reader, error) {
+func New(passDir, password string, cert io.Reader) (io.Reader, error) {
 	// Create a temporary directory that we will use as a scratch pad for our
 	// openssl commands.
-	dir, err := ioutil.TempDir("", "")
+	tempDir, err := ioutil.TempDir("", "")
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(dir)
+	defer os.RemoveAll(tempDir)
 
 	// Copy the certificate into a file so that it can be used by
 	// os.Exec
-	c, err := os.Create(fmt.Sprintf("%s/certificates.p12", dir))
+	c, err := os.Create(fmt.Sprintf("%s/certificates.p12", tempDir))
 	if err != nil {
 		return nil, err
 	}
 	defer c.Close()
+
 	_, err = io.Copy(c, cert)
 	if err != nil {
 		return nil, err
 	}
 
 	// Create the certificate.pem file
-	err = pem(dir, password, cert)
+	err = pem(tempDir, password, cert)
 	if err != nil {
 		return nil, err
 	}
 
 	// Create the key.pem file
-	err = key(dir, password, cert)
+	err = key(tempDir, password, cert)
 	if err != nil {
 		return nil, err
 	}
@@ -56,13 +53,15 @@ func New(files []os.FileInfo, cert io.Reader, password string) (io.Reader, error
 	w := zip.NewWriter(buf)
 	defer w.Close()
 
-	err = bundle(w, dir, files)
+	// Create the bundle of files, this will include everything
+	// in the directory
+	err = bundle(w, passDir, tempDir)
 	if err != nil {
 		return nil, err
 	}
 
 	// Sign the manifest.json
-	err = sign(w, dir, password)
+	err = sign(w, tempDir, password)
 	if err != nil {
 		return nil, err
 	}
@@ -70,15 +69,16 @@ func New(files []os.FileInfo, cert io.Reader, password string) (io.Reader, error
 	return buf, nil
 }
 
-func key(dir, password string, cert io.Reader) error {
+// key will generate the private key that is needed in the openssl smime command
+func key(tempDir, password string, cert io.Reader) error {
 	cmd := exec.Command(
 		"openssl",
 		"pkcs12",
 		"-in",
-		fmt.Sprintf("%s/certificates.p12", dir),
+		fmt.Sprintf("%s/certificates.p12", tempDir),
 		"-nocerts",
 		"-out",
-		fmt.Sprintf("%s/key.pem", dir),
+		fmt.Sprintf("%s/key.pem", tempDir),
 		"-passin",
 		fmt.Sprintf("pass:%s", password),
 		"-passout",
@@ -87,91 +87,97 @@ func key(dir, password string, cert io.Reader) error {
 	return cmd.Run()
 }
 
-func pem(dir, password string, cert io.Reader) error {
+// key will generate the certificate's pem file that is needed in the openssl smime command
+func pem(tempDir, password string, cert io.Reader) error {
 	cmd := exec.Command(
 		"openssl",
 		"pkcs12",
 		"-in",
-		fmt.Sprintf("%s/certificates.p12", dir),
+		fmt.Sprintf("%s/certificates.p12", tempDir),
 		"-clcerts",
 		"-nokeys",
 		"-out",
-		fmt.Sprintf("%s/certificate.pem", dir),
+		fmt.Sprintf("%s/certificate.pem", tempDir),
 		"-passin",
 		fmt.Sprintf("pass:%s", password),
 	)
 	return cmd.Run()
 }
 
-func bundle(w *zip.Writer, dir string, files []os.FileInfo) error {
+// bundle will read all of the files in the passDir, create a manifest.json, and
+// add all files to the zip archive.
+func bundle(w *zip.Writer, passDir, tempDir string) error {
+	files, err := ioutil.ReadDir(passDir)
+	if err != nil {
+		return err
+	}
+
 	var m = make(map[string]string)
 	for _, fi := range files {
+		// Skip directories, they are meaningless in this situation
 		if fi.IsDir() {
 			continue
 		}
 
-		f, err := os.Open(fmt.Sprintf("Coupon.pass/%s", fi.Name()))
+		// Open the file in the directory
+		f, err := os.Open(filepath.Join(passDir, fi.Name()))
 		if err != nil {
 			return err
 		}
 
-		b, err := ioutil.ReadAll(f)
+		// Create the sha writer
+		hw := sha1.New()
+
+		// Create the zip writer
+		zw, err := w.Create(fi.Name())
 		if err != nil {
 			return err
 		}
 
-		f.Seek(0, 0)
+		mw := io.MultiWriter(hw, zw)
 
-		h := sha1.New()
-		_, err = io.Copy(h, f)
+		// Write the file to the zip writer
+		_, err = io.Copy(mw, f)
 		if err != nil {
 			return err
 		}
 
-		sha := h.Sum(nil)
+		// Add the hash to a map, later we will json.Marshal this to make manifest.json
+		sha := hw.Sum(nil)
 		m[fi.Name()] = fmt.Sprintf("%x", sha)
-
-		f2, err := w.Create(fi.Name())
-		if err != nil {
-			return err
-		}
-
-		_, err = f2.Write(b)
-		if err != nil {
-			return err
-		}
 	}
 
-	f, err := w.Create("manifest.json")
+	// Create the file writer
+	f, err := os.Create(filepath.Join(tempDir, "manifest.json"))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	// Create the zip writer
+	zw, err := w.Create("manifest.json")
 	if err != nil {
 		return err
 	}
 
-	b, err := json.Marshal(m)
+	mw := io.MultiWriter(f, zw)
+
+	// Write the JSON to the file, and zip
+	err = json.NewEncoder(mw).Encode(m)
 	if err != nil {
 		return err
 	}
-
-	_, err = f.Write(b)
-	if err != nil {
-		return err
-	}
-
-	man, err := os.Create(fmt.Sprintf("%s/manifest.json", dir))
-	if err != nil {
-		return err
-	}
-	defer man.Close()
-
-	man.Write(b)
 
 	return nil
 }
 
-func sign(w *zip.Writer, dir string, password string) error {
+// sign will sign the manifest json using the keys and certificates created
+// in key and pem respectively. It will then write the signature file to the zip
+// archive so that we can open the pass.
+func sign(w *zip.Writer, tempDir, password string) error {
 	// Copy the wwdr certificate into a file so that it can be used
 	// by openssl
-	f, err := os.Create(fmt.Sprintf("%s/wwdr.pem", dir))
+	f, err := os.Create(fmt.Sprintf("%s/wwdr.pem", tempDir))
 	if err != nil {
 		return err
 	}
@@ -187,38 +193,39 @@ func sign(w *zip.Writer, dir string, password string) error {
 		"smime",
 		"-sign",
 		"-signer",
-		fmt.Sprintf("%s/certificate.pem", dir),
+		fmt.Sprintf("%s/certificate.pem", tempDir),
 		"-inkey",
-		fmt.Sprintf("%s/key.pem", dir),
+		fmt.Sprintf("%s/key.pem", tempDir),
 		"-certfile",
-		fmt.Sprintf("%s/wwdr.pem", dir),
+		fmt.Sprintf("%s/wwdr.pem", tempDir),
 		"-in",
-		fmt.Sprintf("%s/manifest.json", dir),
+		fmt.Sprintf("%s/manifest.json", tempDir),
 		"-out",
-		fmt.Sprintf("%s/signature", dir),
+		fmt.Sprintf("%s/signature", tempDir),
 		"-outform",
 		"der",
 		"-binary",
 		"-passin",
 		fmt.Sprintf("pass:%s1234", password),
 	)
+	cmd.Stderr = os.Stderr
 	err = cmd.Run()
 	if err != nil {
 		return err
 	}
 
-	sig, err := os.Open(fmt.Sprintf("%s/signature", dir))
+	sig, err := os.Open(fmt.Sprintf("%s/signature", tempDir))
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	z, err := w.Create("signature")
+	zw, err := w.Create("signature")
 	if err != nil {
 		return err
 	}
 
-	_, err = io.Copy(z, sig)
+	_, err = io.Copy(zw, sig)
 	if err != nil {
 		return err
 	}
