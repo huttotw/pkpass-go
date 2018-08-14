@@ -1,0 +1,7 @@
+*.p12
+*.pem
+*.cer
+*.pass
+*.pkpass
+
+.DS_Store
