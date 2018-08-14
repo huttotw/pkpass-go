@@ -7,6 +7,8 @@ For instructions on how to obtain these certifcates for your account, [please se
 
 ![example coupon](pass.png "Example Coupon")
 
+Currently, we depend on [openssl](https://www.openssl.org/). When running in production, I recommend installing this in your Docker container.
+
 ## Usage
 ```go
 // Open your certifcate via a file, string reader, etc.
@@ -38,10 +40,7 @@ if err != nil {
 }
 ```
 
-## Notes
-_This package depends on [openssl](https://www.openssl.org/)_. When running in production, I recommend installing this in your Dockerfile.
-
-# Certificates
+## Certificates
 When you log into your Apple Developer account, you should create a _Pass Type ID_. This type id will be what goes into your pass.json file, and will be what the certificate will be attached to. You should name this using the reverse domain convention.
 
 ```
@@ -53,10 +52,10 @@ Once you have created a _Pass Type ID_, click edit. Follow the instructions to c
 It is important that you update your `pass.json` file prior to creating the pass. You will need to substitute the `passTypeIdentifier` and  `teamIdentifier` for their actual values.
 
 ## License
-Copyright © 2018 Trevor Hutto
+_Copyright © 2018 Trevor Hutto_
 
-Licensed under the Apache License, Version 2.0 (the "License"); you may not use this work except in compliance with the License. You may obtain a copy of the License in the LICENSE file, or at:
+_Licensed under the Apache License, Version 2.0 (the "License"); you may not use this work except in compliance with the License. You may obtain a copy of the License in the LICENSE file, or at:_
 
 http://www.apache.org/licenses/LICENSE-2.0
 
-Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
+_Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License._
